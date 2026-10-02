@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 
-const API_URL = "https://tiny-url-clone-production.up.railway.app/";
+const API_URL = "https://tiny-url-clone-production.up.railway.app";
 
 // Helper: fetch with automatic retry (handles server "waking up")
 async function fetchWithRetry(url, options = {}, retries = 2, delay = 2000) {
