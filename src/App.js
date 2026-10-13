@@ -1,8 +1,56 @@
 import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, Legend } from "recharts"; // 🆕 NEW: PieChart, Pie, Cell, Legend added for the subscription donut chart
 
 const API_URL = "https://tiny-url-clone-production.up.railway.app";
+
+async function startCheckout(billingCycle) {
+  const token = localStorage.getItem("token");
+  if (!token) {
+    window.location.hash = "#/login";
+    return;
+  }
+  try {
+    const res = await fetchWithRetry(`${API_URL}/api/stripe/create-checkout-session`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ billingCycle }),
+    });
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url; // Stripe Checkout page pe redirect
+    }
+  } catch (err) {
+    alert("Checkout start nahi ho saka. Dobara koshish karein.");
+  }
+}
+
+async function openBillingPortal() {
+  const token = localStorage.getItem("token");
+  const res = await fetchWithRetry(`${API_URL}/api/stripe/create-portal-session`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (data.url) window.location.href = data.url;
+}
+
+// 🆕 NEW: fetch current user's subscription status from backend
+async function fetchSubscriptionStatus(token) {
+  if (!token) return null;
+  try {
+    const res = await fetchWithRetry(`${API_URL}/api/stripe/subscription-status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
 
 // Helper: fetch with automatic retry (handles server "waking up")
 async function fetchWithRetry(url, options = {}, retries = 2, delay = 2000) {
@@ -21,6 +69,36 @@ function App() {
   const [page, setPage] = useState("home");
   const [token, setToken] = useState(localStorage.getItem("token") || "");
   const [user, setUser] = useState(JSON.parse(localStorage.getItem("user") || "null"));
+  const [subscription, setSubscription] = useState(null); // 🆕 NEW: holds { plan, status, cancelAtPeriodEnd, ... }
+
+  // 🆕 NEW: load subscription status whenever token changes (login/logout)
+  const refreshSubscription = async () => {
+    if (!token) {
+      setSubscription(null);
+      return;
+    }
+    const data = await fetchSubscriptionStatus(token);
+    setSubscription(data);
+  };
+
+  useEffect(() => {
+    refreshSubscription();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // 🆕 NEW: handle redirect back from Stripe Checkout (success / canceled)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("checkout") === "success") {
+      alert("Payment successful! Subscription update hone mein kuch second lag saktay hain.");
+      window.history.replaceState({}, "", window.location.pathname);
+      setTimeout(refreshSubscription, 3000); // thori dair baad dobara fetch, webhook process hone ka time dene ke liye
+    } else if (params.get("checkout") === "canceled") {
+      alert("Checkout cancel kar diya gaya.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLoginSuccess = (data) => {
     localStorage.setItem("token", data.token);
@@ -35,6 +113,7 @@ function App() {
     localStorage.removeItem("user");
     setToken("");
     setUser(null);
+    setSubscription(null); // 🆕 NEW
     setPage("home");
   };
 
@@ -47,9 +126,15 @@ function App() {
           {page === "home" && <HomePage setPage={setPage} token={token} />}
           {page === "login" && <LoginPage onSuccess={handleLoginSuccess} goToSignup={() => setPage("signup")} />}
           {page === "signup" && <SignupPage onSuccess={handleLoginSuccess} goToLogin={() => setPage("login")} />}
-          {page === "dashboard" && <Dashboard token={token} user={user} />}
+          {page === "dashboard" && <Dashboard token={token} user={user} subscription={subscription} />}
           {page === "blog" && <BlogPage />}
-          {page === "profile" && <ProfilePage user={user} onLogout={handleLogout} />}
+          {page === "profile" && (
+            <ProfilePage
+              user={user}
+              onLogout={handleLogout}
+              subscription={subscription}
+            />
+          )}
         </div>
       </div>
 
@@ -167,6 +252,8 @@ function HomePage({ setPage, token }) {
   const [shortUrl, setShortUrl] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [billingCycle, setBillingCycle] = useState("monthly"); // 🆕 NEW: Pro plan monthly/yearly toggle
+  const [checkoutLoading, setCheckoutLoading] = useState(false); // 🆕 NEW
 
   const quickShorten = async () => {
     setError("");
@@ -196,6 +283,14 @@ function HomePage({ setPage, token }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 🆕 NEW: handle "Upgrade to Pro" click on the home page Plans section
+  const handleUpgradeClick = async () => {
+    if (checkoutLoading) return;
+    setCheckoutLoading(true);
+    await startCheckout(billingCycle);
+    setCheckoutLoading(false);
   };
 
   return (
@@ -311,10 +406,35 @@ function HomePage({ setPage, token }) {
         </div>
       </div>
 
-      {/* PLANS */}
+      {/* PLANS — 🆕 NEW: now interactive with monthly/yearly toggle + real Stripe checkout */}
       <div>
         <h2 className="font-display text-3xl font-extrabold text-white text-center mb-2">Plans</h2>
-        <p className="text-slate-400 text-center mb-10">Start free. Upgrade when you're ready to scale.</p>
+        <p className="text-slate-400 text-center mb-6">Start free. Upgrade when you're ready to scale.</p>
+
+        {/* 🆕 NEW: billing cycle toggle */}
+        <div className="flex gap-2 justify-center mb-8">
+          <button
+            onClick={() => setBillingCycle("monthly")}
+            className={`px-4 py-1.5 rounded-full text-sm font-bold transition ${
+              billingCycle === "monthly"
+                ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white"
+                : "bg-white/5 text-slate-400 border border-white/10"
+            }`}
+          >
+            Monthly
+          </button>
+          <button
+            onClick={() => setBillingCycle("yearly")}
+            className={`px-4 py-1.5 rounded-full text-sm font-bold transition ${
+              billingCycle === "yearly"
+                ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white"
+                : "bg-white/5 text-slate-400 border border-white/10"
+            }`}
+          >
+            Yearly <span className="opacity-75">(save more)</span>
+          </button>
+        </div>
+
         <div className="grid sm:grid-cols-2 gap-6">
           <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
             <h3 className="text-white font-bold text-xl mb-1">Free</h3>
@@ -328,18 +448,26 @@ function HomePage({ setPage, token }) {
             </ul>
           </div>
           <div className="bg-gradient-to-br from-violet-900/40 to-fuchsia-900/30 border border-violet-500/30 rounded-2xl p-8 relative">
-            <span className="absolute -top-3 right-6 bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-xs font-bold px-3 py-1 rounded-full">
-              Coming Soon
-            </span>
             <h3 className="text-white font-bold text-xl mb-1">Pro</h3>
             <p className="text-slate-400 text-sm mb-4">For growing teams &amp; brands</p>
-            <p className="text-4xl font-extrabold text-white mb-6">TBA</p>
-            <ul className="text-slate-300 text-sm flex flex-col gap-2">
+            <p className="text-4xl font-extrabold text-white mb-6">
+              {billingCycle === "monthly" ? "$5" : "$48"}
+              <span className="text-base font-normal text-slate-400">/{billingCycle === "monthly" ? "mo" : "yr"}</span>
+            </p>
+            <ul className="text-slate-300 text-sm flex flex-col gap-2 mb-6">
               <li>✓ Everything in Free</li>
-              <li>✓ Branded custom domains</li>
               <li>✓ Bulk link shortening</li>
               <li>✓ Advanced link management</li>
+              <li>✓ Priority support</li>
             </ul>
+            {/* 🆕 NEW: real upgrade button */}
+            <button
+              onClick={handleUpgradeClick}
+              disabled={checkoutLoading}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 disabled:opacity-50 text-white font-bold shadow-lg hover:scale-[1.02] transition-all duration-200"
+            >
+              {checkoutLoading ? "Redirecting..." : "Upgrade to Pro"}
+            </button>
           </div>
         </div>
       </div>
@@ -371,7 +499,7 @@ function HomePage({ setPage, token }) {
           <h3 className="text-white font-bold text-xl mb-3">Domains</h3>
           <p className="text-slate-400 text-sm mb-3">Your links are currently served from:</p>
           <p className="text-violet-300 font-mono text-sm bg-slate-900/60 rounded-lg px-3 py-2 inline-block">
-            tinyurls-backend.bonto.run
+            tiny-url-clone-production.up.railway.app
           </p>
         </div>
       </div>
@@ -424,7 +552,9 @@ function BlogPage() {
 }
 
 // ================= PROFILE PAGE =================
-function ProfilePage({ user, onLogout }) {
+function ProfilePage({ user, onLogout, subscription }) { // 🆕 NEW: subscription prop
+  const isPro = subscription?.plan === "pro"; // 🆕 NEW
+
   return (
     <div className="max-w-md mx-auto">
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl p-8 text-center">
@@ -433,6 +563,29 @@ function ProfilePage({ user, onLogout }) {
         </div>
         <h1 className="text-2xl font-extrabold text-white mb-1">{user?.name}</h1>
         <p className="text-slate-400 mb-6">{user?.email}</p>
+
+        {/* 🆕 NEW: subscription status card */}
+        <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-4 mb-6 text-left">
+          <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">Current Plan</p>
+          <p className="text-white font-bold text-lg mb-2">
+            {isPro ? "Pro ✨" : "Free"}
+          </p>
+          {isPro && (
+            <>
+              <p className="text-slate-400 text-xs">
+                Status: <span className="text-violet-300 font-semibold">{subscription.status}</span>
+                {subscription.cancelAtPeriodEnd && " (cancels at period end)"}
+              </p>
+              <button
+                onClick={openBillingPortal}
+                className="mt-3 w-full py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 text-white font-bold text-sm shadow-lg transition-all duration-200"
+              >
+                Manage Subscription
+              </button>
+            </>
+          )}
+        </div>
+
         <button onClick={onLogout} className="w-full py-3 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white font-bold transition-all duration-200">
           Logout
         </button>
@@ -551,8 +704,56 @@ function SignupPage({ onSuccess, goToLogin }) {
   );
 }
 
+// 🆕 NEW: colorful stat cards row (inspired by the admin-dashboard screenshot, in our violet/fuchsia theme)
+function StatsRow({ totalLinks, totalClicks, plan }) {
+  const cards = [
+    { label: "Total Links", value: totalLinks, gradient: "from-violet-600 to-purple-500", icon: "🔗" },
+    { label: "Total Clicks", value: totalClicks, gradient: "from-fuchsia-600 to-pink-500", icon: "📊" },
+    { label: "Plan", value: plan === "pro" ? "Pro ✨" : "Free", gradient: "from-blue-600 to-cyan-500", icon: "⭐" },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      {cards.map((c) => (
+        <div key={c.label} className={`bg-gradient-to-br ${c.gradient} rounded-2xl p-5 text-white shadow-lg`}>
+          <p className="text-sm opacity-90">{c.label}</p>
+          <p className="font-bold mt-1 text-2xl">{c.icon} {c.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 🆕 NEW: simple donut chart showing links vs clicks ratio
+function ClicksDonut({ totalLinks, totalClicks }) {
+  const data = [
+    { name: "Links", value: totalLinks || 0 },
+    { name: "Clicks", value: totalClicks || 0 },
+  ];
+  const COLORS = ["#8b5cf6", "#d946ef"];
+
+  if (totalLinks === 0 && totalClicks === 0) return null;
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6" style={{ height: 240 }}>
+      <p className="text-white font-bold mb-2">Overview</p>
+      <ResponsiveContainer width="100%" height="85%">
+        <PieChart>
+          <Pie data={data} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={4}>
+            {data.map((_, i) => (
+              <Cell key={i} fill={COLORS[i % COLORS.length]} />
+            ))}
+          </Pie>
+          <Legend />
+          <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", borderRadius: 8 }} />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 // ================= DASHBOARD =================
-function Dashboard({ token, user }) {
+function Dashboard({ token, user, subscription }) { // 🆕 NEW: subscription prop
   const [longUrl, setLongUrl] = useState("");
   const [customAlias, setCustomAlias] = useState("");
   const [shortUrl, setShortUrl] = useState("");
@@ -647,6 +848,9 @@ function Dashboard({ token, user }) {
     return [];
   };
 
+  // 🆕 NEW: totals for the stat cards + donut chart
+  const totalClicksAll = myUrls.reduce((sum, u) => sum + (u.totalClicks || 0), 0);
+
   return (
     <div
       className="max-w-xl mx-auto relative rounded-3xl overflow-hidden"
@@ -660,6 +864,10 @@ function Dashboard({ token, user }) {
     >
       <div className="p-4 sm:p-6">
         <h1 className="font-display text-3xl font-extrabold text-white mb-6">👋 Welcome, {user?.name}</h1>
+
+        {/* 🆕 NEW: stat cards + donut chart */}
+        <StatsRow totalLinks={myUrls.length} totalClicks={totalClicksAll} plan={subscription?.plan} />
+        <ClicksDonut totalLinks={myUrls.length} totalClicks={totalClicksAll} />
 
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl p-8 mb-6">
           <div className="flex flex-col gap-3">
@@ -743,6 +951,7 @@ function ChatWidget() {
     { keys: ["login", "log in"], answer: "Click 'Login' in the top right and enter your email and password." },
     { keys: ["qr", "code"], answer: "A QR code is automatically generated for every link you shorten in the Dashboard." },
     { keys: ["slow", "not working", "wake", "connect"], answer: "If the server was inactive, it may take a few seconds to wake up. Just try again!" },
+    { keys: ["pro", "upgrade", "subscription", "pricing"], answer: "Head to the Plans section on the Home page to upgrade to Pro — payments are handled securely through Stripe." }, // 🆕 NEW
   ];
 
   const handleSend = () => {
