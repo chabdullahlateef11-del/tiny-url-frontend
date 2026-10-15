@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, Legend } from "recharts"; // 🆕 NEW: PieChart, Pie, Cell, Legend added for the subscription donut chart
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, Legend } from "recharts";
 
-const API_URL = "https://tiny-url-clone-production.up.railway.app";
+const API_URL = "https://tinyurl-backend-production-4561.up.railway.app"; // Railway ka asal, confirmed domain
 
 async function startCheckout(billingCycle) {
   const token = localStorage.getItem("token");
@@ -24,7 +24,7 @@ async function startCheckout(billingCycle) {
       window.location.href = data.url; // Stripe Checkout page pe redirect
     }
   } catch (err) {
-    alert("Checkout start nahi ho saka. Dobara koshish karein.");
+    alert("Could not start checkout. Please try again.");
   }
 }
 
@@ -38,7 +38,7 @@ async function openBillingPortal() {
   if (data.url) window.location.href = data.url;
 }
 
-// 🆕 NEW: fetch current user's subscription status from backend
+// subscription status backend se fetch karta hai
 async function fetchSubscriptionStatus(token) {
   if (!token) return null;
   try {
@@ -52,7 +52,7 @@ async function fetchSubscriptionStatus(token) {
   }
 }
 
-// Helper: fetch with automatic retry (handles server "waking up")
+// Helper: fetch with automatic retry (server "waking up" wala case handle karta hai)
 async function fetchWithRetry(url, options = {}, retries = 2, delay = 2000) {
   for (let i = 0; i <= retries; i++) {
     try {
@@ -69,9 +69,9 @@ function App() {
   const [page, setPage] = useState("home");
   const [token, setToken] = useState(localStorage.getItem("token") || "");
   const [user, setUser] = useState(JSON.parse(localStorage.getItem("user") || "null"));
-  const [subscription, setSubscription] = useState(null); // 🆕 NEW: holds { plan, status, cancelAtPeriodEnd, ... }
+  const [subscription, setSubscription] = useState(null); // { plan, status, cancelAtPeriodEnd, ... }
 
-  // 🆕 NEW: load subscription status whenever token changes (login/logout)
+  // token change hote hi (login/logout) subscription status refresh karo
   const refreshSubscription = async () => {
     if (!token) {
       setSubscription(null);
@@ -86,15 +86,15 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // 🆕 NEW: handle redirect back from Stripe Checkout (success / canceled)
+  // Stripe Checkout se wapas aane par (success/canceled) URL params handle karo
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("checkout") === "success") {
-      alert("Payment successful! Subscription update hone mein kuch second lag saktay hain.");
+      alert("Payment successful! Your subscription will update in a few seconds.");
       window.history.replaceState({}, "", window.location.pathname);
       setTimeout(refreshSubscription, 3000); // thori dair baad dobara fetch, webhook process hone ka time dene ke liye
     } else if (params.get("checkout") === "canceled") {
-      alert("Checkout cancel kar diya gaya.");
+      alert("Checkout was canceled.");
       window.history.replaceState({}, "", window.location.pathname);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -113,7 +113,7 @@ function App() {
     localStorage.removeItem("user");
     setToken("");
     setUser(null);
-    setSubscription(null); // 🆕 NEW
+    setSubscription(null);
     setPage("home");
   };
 
@@ -127,17 +127,15 @@ function App() {
           {page === "login" && <LoginPage onSuccess={handleLoginSuccess} goToSignup={() => setPage("signup")} />}
           {page === "signup" && <SignupPage onSuccess={handleLoginSuccess} goToLogin={() => setPage("login")} />}
           {page === "dashboard" && <Dashboard token={token} user={user} subscription={subscription} />}
+          {page === "analytics" && <AnalyticsPage token={token} />}
           {page === "blog" && <BlogPage />}
           {page === "profile" && (
-            <ProfilePage
-              user={user}
-              onLogout={handleLogout}
-              subscription={subscription}
-            />
+            <ProfilePage user={user} onLogout={handleLogout} subscription={subscription} />
           )}
         </div>
       </div>
 
+      <Footer />
       <ChatWidget />
     </div>
   );
@@ -178,6 +176,7 @@ function Navbar({ page, setPage, token, user }) {
           <NavButton target="home" label="Home" />
           <NavButton target="blog" label="Blog" />
           {token && <NavButton target="dashboard" label="Dashboard" />}
+          {token && <NavButton target="analytics" label="Analytics" />}
         </div>
 
         <div className="hidden sm:flex items-center gap-3">
@@ -220,6 +219,7 @@ function Navbar({ page, setPage, token, user }) {
           <NavButton target="home" label="Home" />
           <NavButton target="blog" label="Blog" />
           {token && <NavButton target="dashboard" label="Dashboard" />}
+          {token && <NavButton target="analytics" label="Analytics" />}
           {token ? (
             <button
               onClick={() => { setPage("profile"); setMenuOpen(false); }}
@@ -252,8 +252,8 @@ function HomePage({ setPage, token }) {
   const [shortUrl, setShortUrl] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [billingCycle, setBillingCycle] = useState("monthly"); // 🆕 NEW: Pro plan monthly/yearly toggle
-  const [checkoutLoading, setCheckoutLoading] = useState(false); // 🆕 NEW
+  const [billingCycle, setBillingCycle] = useState("monthly"); // Pro plan monthly/yearly toggle
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   const quickShorten = async () => {
     setError("");
@@ -285,7 +285,7 @@ function HomePage({ setPage, token }) {
     }
   };
 
-  // 🆕 NEW: handle "Upgrade to Pro" click on the home page Plans section
+  // "Upgrade to Pro" click handle karta hai home page ke Plans section mein
   const handleUpgradeClick = async () => {
     if (checkoutLoading) return;
     setCheckoutLoading(true);
@@ -406,12 +406,11 @@ function HomePage({ setPage, token }) {
         </div>
       </div>
 
-      {/* PLANS — 🆕 NEW: now interactive with monthly/yearly toggle + real Stripe checkout */}
+      {/* PLANS — monthly/yearly toggle + real Stripe checkout */}
       <div>
         <h2 className="font-display text-3xl font-extrabold text-white text-center mb-2">Plans</h2>
         <p className="text-slate-400 text-center mb-6">Start free. Upgrade when you're ready to scale.</p>
 
-        {/* 🆕 NEW: billing cycle toggle */}
         <div className="flex gap-2 justify-center mb-8">
           <button
             onClick={() => setBillingCycle("monthly")}
@@ -460,7 +459,6 @@ function HomePage({ setPage, token }) {
               <li>✓ Advanced link management</li>
               <li>✓ Priority support</li>
             </ul>
-            {/* 🆕 NEW: real upgrade button */}
             <button
               onClick={handleUpgradeClick}
               disabled={checkoutLoading}
@@ -552,8 +550,8 @@ function BlogPage() {
 }
 
 // ================= PROFILE PAGE =================
-function ProfilePage({ user, onLogout, subscription }) { // 🆕 NEW: subscription prop
-  const isPro = subscription?.plan === "pro"; // 🆕 NEW
+function ProfilePage({ user, onLogout, subscription }) {
+  const isPro = subscription?.plan === "pro";
 
   return (
     <div className="max-w-md mx-auto">
@@ -564,7 +562,6 @@ function ProfilePage({ user, onLogout, subscription }) { // 🆕 NEW: subscripti
         <h1 className="text-2xl font-extrabold text-white mb-1">{user?.name}</h1>
         <p className="text-slate-400 mb-6">{user?.email}</p>
 
-        {/* 🆕 NEW: subscription status card */}
         <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-4 mb-6 text-left">
           <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">Current Plan</p>
           <p className="text-white font-bold text-lg mb-2">
@@ -598,6 +595,7 @@ function ProfilePage({ user, onLogout, subscription }) { // 🆕 NEW: subscripti
 function LoginPage({ onSuccess, goToSignup }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false); // password dikhane/chupane ka toggle
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -634,7 +632,24 @@ function LoginPage({ onSuccess, goToSignup }) {
       </h1>
       <div className="flex flex-col gap-3">
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full px-4 py-3.5 rounded-xl bg-slate-900/80 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition" />
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full px-4 py-3.5 rounded-xl bg-slate-900/80 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition" />
+        <div className="relative">
+          <input
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            className="w-full px-4 py-3.5 pr-12 rounded-xl bg-slate-900/80 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+          />
+          {/* password show/hide icon */}
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition text-lg"
+            tabIndex={-1}
+          >
+            {showPassword ? "🙈" : "👁️"}
+          </button>
+        </div>
         <button onClick={handleLogin} disabled={loading} className="w-full py-3.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 disabled:opacity-50 text-white font-bold shadow-lg hover:scale-[1.02] transition-all duration-200">
           {loading ? "Logging in..." : "Login"}
         </button>
@@ -653,6 +668,7 @@ function SignupPage({ onSuccess, goToLogin }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false); // password dikhane/chupane ka toggle
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -690,7 +706,24 @@ function SignupPage({ onSuccess, goToLogin }) {
       <div className="flex flex-col gap-3">
         <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full Name" className="w-full px-4 py-3.5 rounded-xl bg-slate-900/80 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition" />
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full px-4 py-3.5 rounded-xl bg-slate-900/80 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition" />
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full px-4 py-3.5 rounded-xl bg-slate-900/80 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition" />
+        <div className="relative">
+          <input
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            className="w-full px-4 py-3.5 pr-12 rounded-xl bg-slate-900/80 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+          />
+          {/* password show/hide icon */}
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition text-lg"
+            tabIndex={-1}
+          >
+            {showPassword ? "🙈" : "👁️"}
+          </button>
+        </div>
         <button onClick={handleSignup} disabled={loading} className="w-full py-3.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 disabled:opacity-50 text-white font-bold shadow-lg hover:scale-[1.02] transition-all duration-200">
           {loading ? "Creating..." : "Sign Up"}
         </button>
@@ -704,7 +737,7 @@ function SignupPage({ onSuccess, goToLogin }) {
   );
 }
 
-// 🆕 NEW: colorful stat cards row (inspired by the admin-dashboard screenshot, in our violet/fuchsia theme)
+// colorful stat cards row (Baligo-style reference se inspired, apni violet/fuchsia theme mein)
 function StatsRow({ totalLinks, totalClicks, plan }) {
   const cards = [
     { label: "Total Links", value: totalLinks, gradient: "from-violet-600 to-purple-500", icon: "🔗" },
@@ -724,36 +757,73 @@ function StatsRow({ totalLinks, totalClicks, plan }) {
   );
 }
 
-// 🆕 NEW: simple donut chart showing links vs clicks ratio
-function ClicksDonut({ totalLinks, totalClicks }) {
+// khoobsurat circular gauge — center mein bara percentage number (reference screenshot se inspired)
+function RadialGauge({ label, value, color = "#8b5cf6", trackColor = "#1e293b", size = 140 }) {
+  const pct = Math.max(0, Math.min(100, Math.round(value)));
   const data = [
-    { name: "Links", value: totalLinks || 0 },
-    { name: "Clicks", value: totalClicks || 0 },
+    { name: "value", value: pct },
+    { name: "rest", value: 100 - pct },
   ];
-  const COLORS = ["#8b5cf6", "#d946ef"];
+  return (
+    <div className="flex flex-col items-center">
+      <div className="relative" style={{ width: size, height: size }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey="value"
+              startAngle={90}
+              endAngle={-270}
+              innerRadius="72%"
+              outerRadius="100%"
+              cornerRadius={20}
+              stroke="none"
+            >
+              <Cell fill={color} />
+              <Cell fill={trackColor} />
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+        {/* chart ke upar overlay — center ka bara number */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-white font-extrabold text-2xl">{pct}%</span>
+        </div>
+      </div>
+      <p className="text-slate-400 text-xs mt-2 text-center">{label}</p>
+    </div>
+  );
+}
 
-  if (totalLinks === 0 && totalClicks === 0) return null;
+// chota colored-dot legend row — gauge ke sath side mein numbers dikhane ke liye
+function LegendRow({ color, label, value }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-3 h-3 rounded-full shrink-0" style={{ background: color }} />
+      <span className="text-slate-300 text-sm">{label}</span>
+      <span className="text-white font-bold text-sm ml-auto">{value}</span>
+    </div>
+  );
+}
+
+// Dashboard ka "Overview" panel — gauge + legend dono ek sath (purani ClicksDonut ki jagah)
+function OverviewPanel({ totalLinks, totalClicks }) {
+  // "engagement" score — kitne links per average click mil rahay hain, ek rough gauge ke taur par
+  const engagementPct = totalLinks > 0 ? Math.min(100, Math.round((totalClicks / totalLinks) * 20)) : 0;
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6" style={{ height: 240 }}>
-      <p className="text-white font-bold mb-2">Overview</p>
-      <ResponsiveContainer width="100%" height="85%">
-        <PieChart>
-          <Pie data={data} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={4}>
-            {data.map((_, i) => (
-              <Cell key={i} fill={COLORS[i % COLORS.length]} />
-            ))}
-          </Pie>
-          <Legend />
-          <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", borderRadius: 8 }} />
-        </PieChart>
-      </ResponsiveContainer>
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 flex items-center gap-8 flex-wrap">
+      <RadialGauge label="Engagement" value={engagementPct} color="#a78bfa" size={130} />
+      <div className="flex flex-col gap-3 flex-1 min-w-[160px]">
+        <p className="text-white font-bold mb-1">Overview</p>
+        <LegendRow color="#8b5cf6" label="Total Links" value={totalLinks} />
+        <LegendRow color="#d946ef" label="Total Clicks" value={totalClicks} />
+      </div>
     </div>
   );
 }
 
 // ================= DASHBOARD =================
-function Dashboard({ token, user, subscription }) { // 🆕 NEW: subscription prop
+function Dashboard({ token, user, subscription }) {
   const [longUrl, setLongUrl] = useState("");
   const [customAlias, setCustomAlias] = useState("");
   const [shortUrl, setShortUrl] = useState("");
@@ -778,6 +848,19 @@ function Dashboard({ token, user, subscription }) { // 🆕 NEW: subscription pr
 
   useEffect(() => {
     fetchMyUrls();
+
+    // tab wapas active hotay hi data dobara fetch karo — taake link open karne ke baad
+    // "Total Clicks" purana (stale) number na dikhaye
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") fetchMyUrls();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const shortenUrl = async () => {
@@ -848,7 +931,7 @@ function Dashboard({ token, user, subscription }) { // 🆕 NEW: subscription pr
     return [];
   };
 
-  // 🆕 NEW: totals for the stat cards + donut chart
+  // stat cards + donut chart ke liye totals
   const totalClicksAll = myUrls.reduce((sum, u) => sum + (u.totalClicks || 0), 0);
 
   return (
@@ -865,9 +948,8 @@ function Dashboard({ token, user, subscription }) { // 🆕 NEW: subscription pr
       <div className="p-4 sm:p-6">
         <h1 className="font-display text-3xl font-extrabold text-white mb-6">👋 Welcome, {user?.name}</h1>
 
-        {/* 🆕 NEW: stat cards + donut chart */}
         <StatsRow totalLinks={myUrls.length} totalClicks={totalClicksAll} plan={subscription?.plan} />
-        <ClicksDonut totalLinks={myUrls.length} totalClicks={totalClicksAll} />
+        <OverviewPanel totalLinks={myUrls.length} totalClicks={totalClicksAll} />
 
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl p-8 mb-6">
           <div className="flex flex-col gap-3">
@@ -935,6 +1017,143 @@ function Dashboard({ token, user, subscription }) { // 🆕 NEW: subscription pr
   );
 }
 
+// "Analytics" page — TinyURL ke hisab se adapted "business performance" style overview
+function AnalyticsPage({ token }) {
+  const [myUrls, setMyUrls] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetchWithRetry(`${API_URL}/api/my-urls`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.ok) setMyUrls(data.urls);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+
+    // tab wapas active hotay hi data dobara fetch karo (stale clicks na dikhayen)
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+    };
+  }, [token]);
+
+  const totalLinks = myUrls.length;
+  const totalClicks = myUrls.reduce((sum, u) => sum + (u.totalClicks || 0), 0);
+  const avgClicks = totalLinks > 0 ? (totalClicks / totalLinks).toFixed(1) : 0;
+  const topLinks = [...myUrls].sort((a, b) => (b.totalClicks || 0) - (a.totalClicks || 0)).slice(0, 5);
+
+  // sample/demo goals — abhi koi "target" system backend mein track nahi hota
+  const linksGoalPct = Math.min(100, Math.round((totalLinks / 50) * 100));
+  const clicksGoalPct = Math.min(100, Math.round((totalClicks / 500) * 100));
+
+  const chartData = (() => {
+    const counts = {};
+    myUrls.forEach((u) => {
+      const day = new Date(u.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+      counts[day] = (counts[day] || 0) + 1;
+    });
+    return Object.entries(counts).map(([date, count]) => ({ date, count }));
+  })();
+
+  if (loading) return <p className="text-slate-400 text-center py-20">Loading analytics...</p>;
+
+  return (
+    <div>
+      <h1 className="font-display text-3xl font-extrabold text-white mb-1">📈 Analytics Overview</h1>
+      <p className="text-slate-400 mb-8">An overview of your links' performance.</p>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+        {[
+          { label: "Total Links", value: totalLinks, gradient: "from-violet-600 to-purple-500" },
+          { label: "Total Clicks", value: totalClicks, gradient: "from-fuchsia-600 to-pink-500" },
+          { label: "Avg Clicks/Link", value: avgClicks, gradient: "from-blue-600 to-cyan-500" },
+          { label: "Active Links", value: totalLinks, gradient: "from-amber-500 to-orange-500" },
+        ].map((c) => (
+          <div key={c.label} className={`bg-gradient-to-br ${c.gradient} rounded-2xl p-5 text-white shadow-lg`}>
+            <p className="text-xs opacity-90">{c.label}</p>
+            <p className="font-bold mt-1 text-2xl">{c.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid sm:grid-cols-3 gap-5 mb-6">
+        <div className="sm:col-span-2 bg-white/5 border border-white/10 rounded-2xl p-5">
+          <h3 className="text-white font-bold mb-3">Links Created Over Time</h3>
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData}>
+                <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
+                <YAxis stroke="#94a3b8" fontSize={11} allowDecimals={false} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", borderRadius: 8 }} />
+                <Bar dataKey="count" fill="#a78bfa" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-slate-500 text-sm">No links created yet.</p>
+          )}
+        </div>
+
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center gap-4">
+          <RadialGauge label="Links Goal" value={linksGoalPct} color="#8b5cf6" size={100} />
+          <RadialGauge label="Clicks Goal" value={clicksGoalPct} color="#3b82f6" size={100} />
+        </div>
+      </div>
+
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+        <h3 className="text-white font-bold mb-4">🏆 Top Performing Links</h3>
+        {topLinks.length === 0 ? (
+          <p className="text-slate-500 text-sm">No links found.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead>
+                <tr className="text-slate-400 border-b border-white/10">
+                  <th className="py-2 pr-4">Short Link</th>
+                  <th className="py-2 pr-4">Clicks</th>
+                  <th className="py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topLinks.map((u) => (
+                  <tr key={u._id} className="border-b border-white/5">
+                    <td className="py-2 pr-4 text-violet-300 truncate max-w-[200px]">{API_URL}/{u.shortId}</td>
+                    <td className="py-2 pr-4 text-white font-semibold">{u.totalClicks || 0}</td>
+                    <td className="py-2">
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-400">Active</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// footer — har page pe dikhega kyunke yeh App() ke root level pe laga hai
+function Footer() {
+  return (
+    <footer className="border-t border-white/10 bg-slate-950/70 py-4 text-center">
+      <p className="text-slate-500 text-xs">Dev by Abdullah Lateef</p>
+    </footer>
+  );
+}
+
 // ================= CHAT WIDGET =================
 function ChatWidget() {
   const [open, setOpen] = useState(false);
@@ -951,7 +1170,7 @@ function ChatWidget() {
     { keys: ["login", "log in"], answer: "Click 'Login' in the top right and enter your email and password." },
     { keys: ["qr", "code"], answer: "A QR code is automatically generated for every link you shorten in the Dashboard." },
     { keys: ["slow", "not working", "wake", "connect"], answer: "If the server was inactive, it may take a few seconds to wake up. Just try again!" },
-    { keys: ["pro", "upgrade", "subscription", "pricing"], answer: "Head to the Plans section on the Home page to upgrade to Pro — payments are handled securely through Stripe." }, // 🆕 NEW
+    { keys: ["pro", "upgrade", "subscription", "pricing"], answer: "Head to the Plans section on the Home page to upgrade to Pro — payments are handled securely through Stripe." },
   ];
 
   const handleSend = () => {
